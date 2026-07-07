@@ -185,10 +185,6 @@ def _hankel_hypersingular_kernel(
     return dst_field
 
 def propagate(d_scene, ia, ib, d_src_field, src_slit, dst_slit):
-    kernel = _hankel_mirror_kernel
-    # kernel = _hankel_slit_kernel
-    # kernel = _hankel_slit_h1_kernel
-
     src_ok, dst_ok = _test_thin_objects_compat(
         d_scene.objs[ia]["pos_x"],
         d_scene.objs[ia]["pos_y"],
