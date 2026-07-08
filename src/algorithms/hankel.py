@@ -12,13 +12,9 @@ _POOL = ThreadPoolExecutor(max_workers=_NUM_CPUS)
 def _cpu_parallel(fn, x):
     orig_shape = x.shape
 
-    # Determine complex output type based on input precision (float32 -> complex64)
     out_dtype = np.complex64 if x.dtype == np.float32 else np.complex128
-
-    # Allocating the 20GB output array EXACTLY ONCE
     out = np.empty(orig_shape, dtype=out_dtype)
 
-    # Flatten using views (.reshape(-1) avoids copying if the array is contiguous)
     x_flat = x.reshape(-1)
     out_flat = out.reshape(-1)
     n = len(x_flat)
@@ -27,7 +23,6 @@ def _cpu_parallel(fn, x):
         fn(x, out=out)
         return out
 
-    # Calculate balanced chunk indices
     chunk_size = (n + _NUM_CPUS - 1)
     futures = []
 
@@ -35,12 +30,11 @@ def _cpu_parallel(fn, x):
         start = i * chunk_size
         end = min(start + chunk_size, n)
         if start < end:
-            # Pass directly into the pre-allocated memory slices (Zero Copying!)
             futures.append(
                 _POOL.submit(fn, x_flat[start:end], out=out_flat[start:end])
             )
 
-    # Synchronize and wait for all CPU threads to finish writing
+    # wait for all CPU threads to finish
     for future in futures:
         future.result()
 

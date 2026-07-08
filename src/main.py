@@ -12,8 +12,7 @@ from algorithms import hankel
 from scene import Scene
 import itertools
 
-jax.config.update("jax_enable_x64", True)
-
+jax.config.update("jax_enable_x64", True) # enable support for complex128
 # jax.config.update("jax_transfer_guard", "log")
 # jax.config.update("jax_transfer_guard", "log_explicit")
 
@@ -185,25 +184,64 @@ def create_scene_diagonals():
     scene.append_slit([11, 0], [11, 20])
     return scene
 
-def create_scene_x():
-    scene = Scene("x", samples_per_wavelength=samples_per_wavelength, wavelength=wavelength)
-    scene.append_slit([-10, -5], [-10, 5])
-    scene.append_slit([10, -5], [10, 5])
+def create_scene_transmissive_grating(wavelength):
+    scene = Scene("Transmissive Grating", samples_per_wavelength=samples_per_wavelength, wavelength=wavelength)
+    scene.append_slit([-500, -10], [-500, 10])
+    # scene.append_slit([-25, -5], [-5, -25])
+    scene.trace_dag = [[]]
+
+    d = 5e-3  # grating spacing
+    a = d/2.0 # grating slit width
+    n = 200   # number of slits
+    s = n * d # grating size
+    print(f"create_scene_transmissive_grating() wavelength = {wavelength}, grating spacing = {d}, slit width = {a}, number of slits = {n}, grating size = {s}")
+
+    for i in range(n):
+        # start = i * d - s/2
+        # end = start + a
+        a = (i*2.0)/(n*2.0)
+        b = (i*2.0+1.0)/(n*2.0)
+        a = a * s - s/2
+        b = b * s - s/2
+        scene.append_slit([0, a], [0, b])
+        scene.trace_dag.append([0])
+
+    scene.append_slit([500, -10], [500, 80])
+    # scene.append_slit([50, -50], [50, 50])
+    # scene.append_arc([0, 0], 50, -math.pi/2, math.pi/2, normal_inward=True)
+    scene.trace_dag.append([i+1 for i in range(n)])
     return scene
 
-scenes = []
-scenes.append(create_scene_law_of_reflection())
-scenes.append(create_scene_hard_cutoff())
-scenes.append(create_scene_single_slit())
-scenes.append(create_scene_double_slit())
-scenes.append(create_scene_sequential_beam(3))
-scenes.append(create_scene_diagonals())
-scenes.append(create_scene_x())
-algorithms = []
-algorithms.append(hankel)
-algorithms.append(rayleigh_sommerfeld)
+def run_experiment_transmissive_grating():
+    colors = ['r', 'g', 'b']
+    wavelengths = [650e-6, 532e-6, 350e-6]
 
-[plot(scene, trace(algorithm, scene)) for scene, algorithm in itertools.product(scenes, algorithms)]
+    scenes = [create_scene_transmissive_grating(i) for i in wavelengths]
+    results = [trace(rayleigh_sommerfeld, scene) for scene in scenes]
+    plt.figure()
+    for i, (scene, result) in enumerate(zip(scenes, results)):
+        x = np.linspace(0, 1, len(result[-1]))
+        plt.plot(x, result[-1], label=f'{scene.wavelength*1e6:.0f} nm', color=colors[i])
+
+    plt.title("Transmissive Grating")
+    plt.xlabel('detector position')
+    plt.ylabel('intensity')
+    plt.legend()
+    plt.show()
+
+run_experiment_transmissive_grating()
+
+# scenes = []
+# scenes.append(create_scene_law_of_reflection())
+# scenes.append(create_scene_hard_cutoff())
+# scenes.append(create_scene_single_slit())
+# scenes.append(create_scene_double_slit())
+# scenes.append(create_scene_sequential_beam(3))
+# scenes.append(create_scene_diagonals())
+# algorithms = []
+# algorithms.append(hankel)
+# algorithms.append(rayleigh_sommerfeld)
+# [plot(scene, trace(algorithm, scene)) for scene, algorithm in itertools.product(scenes, algorithms)]
 
 # def run():
 #     [trace(algorithm, scene) for algorithm, scene in itertools.product(algorithms, scenes)]

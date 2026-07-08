@@ -2,6 +2,7 @@ import numpy as np
 import math
 import jax
 import jax.numpy as jnp
+from enum import Enum
 
 ### scene ###
 
@@ -79,6 +80,8 @@ class SceneInstance:
         self.objs = objs
 
 def _instantiate_object(obj, samples_per_wavelength, wavelength):
+    sample_density = samples_per_wavelength / wavelength
+
     def instantiate_point(obj):
         return {
             "pos_x": jnp.array([obj["pos"][0]]),
@@ -102,9 +105,8 @@ def _instantiate_object(obj, samples_per_wavelength, wavelength):
     def instantiate_line(obj):
         pos_a = np.array(obj["pos_a"])
         pos_b = np.array(obj["pos_b"])
-
         l = np.sqrt((pos_a[0] - pos_b[0])**2 + (pos_a[1] - pos_b[1])**2)
-        n = math.ceil(samples_per_wavelength * l / wavelength)
+        n = math.ceil(l * sample_density)
         v = pos_b - pos_a
         return {
             "pos_x": jnp.linspace(pos_a[0], pos_b[0], n),
@@ -120,12 +122,12 @@ def _instantiate_object(obj, samples_per_wavelength, wavelength):
         normal_inward = obj["normal_inward"]
 
         circumference = 2 * math.pi * radius
-        n = math.ceil(samples_per_wavelength * circumference / wavelength)
+        n = math.ceil(circumference * sample_density)
         angles = jnp.linspace(0, 2 * jnp.pi, n, endpoint=False)
-        pos_x = pos[0] + radius * jnp.cos(angles)
-        pos_y = pos[1] + radius * jnp.sin(angles)
         normal_x = jnp.cos(angles)
         normal_y = jnp.sin(angles)
+        pos_x = pos[0] + radius * normal_x
+        pos_y = pos[1] + radius * normal_y
         normal_x = -normal_x if normal_inward else normal_x
         normal_y = -normal_y if normal_inward else normal_y
         dx = circumference / n
@@ -145,14 +147,14 @@ def _instantiate_object(obj, samples_per_wavelength, wavelength):
         normal_inward = obj["normal_inward"]
 
         arc_length = radius * (angle_end - angle_start)
-        n = math.ceil(samples_per_wavelength * arc_length / wavelength)
+        n = math.ceil(arc_length * sample_density)
         angles = jnp.linspace(angle_start, angle_end, n)
         normal_x = jnp.cos(angles)
         normal_y = jnp.sin(angles)
+        pos_x = pos[0] + normal_x * radius
+        pos_y = pos[1] + normal_y * radius
         normal_x = -normal_x if normal_inward else normal_x
         normal_y = -normal_y if normal_inward else normal_y
-        pos_x = pos[0] * normal_x
-        pos_y = pos[1] * normal_y
         dx = arc_length / n
         return {
             "pos_x": pos_x,
