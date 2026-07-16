@@ -67,6 +67,10 @@ def _rayleigh_sommerfeld_kernel(
 
     return dst_field
 
+@jax.jit
+def _hankel_transmissive_grating_kernel():
+    pass
+
 def propagate(d_scene, ia, ib, d_src_field, src_slit, dst_slit):
     return _rayleigh_sommerfeld_kernel(
         d_scene.objs[ia]["pos_x"],

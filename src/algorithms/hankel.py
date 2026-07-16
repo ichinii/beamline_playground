@@ -145,6 +145,14 @@ def _hankel_slit_kernel(
     # dst_field = 0.5j * dst_field # idk
     return dst_field
 
+@jax.jit
+def _hankel_transmissive_grating_kernel():
+    pass
+
+@jax.jit
+def _hankel_reflective_grating_kernel():
+    pass
+
 # requied for Dual Boundary Element Method (when objects have no thickness)
 # has the problem of 1/(r^2) singularity when source and destination are at the same position
 # -> Singularity Subtraction or switch to a Galerkin weak-form integration

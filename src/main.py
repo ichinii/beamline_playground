@@ -186,13 +186,13 @@ def create_scene_diagonals():
 
 def create_scene_transmissive_grating(wavelength):
     scene = Scene("Transmissive Grating", samples_per_wavelength=samples_per_wavelength, wavelength=wavelength)
-    scene.append_slit([-500, -10], [-500, 10])
+    scene.append_slit([-1000, -1], [-1000, 1])
     # scene.append_slit([-25, -5], [-5, -25])
     scene.trace_dag = [[]]
 
     d = 5e-3  # grating spacing
     a = d/2.0 # grating slit width
-    n = 200   # number of slits
+    n = 500   # number of slits
     s = n * d # grating size
     print(f"create_scene_transmissive_grating() wavelength = {wavelength}, grating spacing = {d}, slit width = {a}, number of slits = {n}, grating size = {s}")
 
@@ -206,7 +206,7 @@ def create_scene_transmissive_grating(wavelength):
         scene.append_slit([0, a], [0, b])
         scene.trace_dag.append([0])
 
-    scene.append_slit([500, -10], [500, 80])
+    scene.append_slit([1000, -10], [1000, 150])
     # scene.append_slit([50, -50], [50, 50])
     # scene.append_arc([0, 0], 50, -math.pi/2, math.pi/2, normal_inward=True)
     scene.trace_dag.append([i+1 for i in range(n)])
@@ -229,7 +229,9 @@ def run_experiment_transmissive_grating():
     plt.legend()
     plt.show()
 
-run_experiment_transmissive_grating()
+# run_experiment_transmissive_grating()
+
+trace(rayleigh_sommerfeld, create_scene_law_of_reflection())
 
 # scenes = []
 # scenes.append(create_scene_law_of_reflection())

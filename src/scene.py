@@ -83,6 +83,8 @@ def _instantiate_object(obj, samples_per_wavelength, wavelength):
     sample_density = samples_per_wavelength / wavelength
 
     def instantiate_point(obj):
+        print(f"instantiate_point(): n=1")
+
         return {
             "pos_x": jnp.array([obj["pos"][0]]),
             "pos_y": jnp.array([obj["pos"][1]]),
@@ -108,6 +110,8 @@ def _instantiate_object(obj, samples_per_wavelength, wavelength):
         l = np.sqrt((pos_a[0] - pos_b[0])**2 + (pos_a[1] - pos_b[1])**2)
         n = math.ceil(l * sample_density)
         v = pos_b - pos_a
+
+        print(f"instantiate_line(): n={n}")
         return {
             "pos_x": jnp.linspace(pos_a[0], pos_b[0], n),
             "pos_y": jnp.linspace(pos_a[1], pos_b[1], n),
@@ -131,6 +135,8 @@ def _instantiate_object(obj, samples_per_wavelength, wavelength):
         normal_x = -normal_x if normal_inward else normal_x
         normal_y = -normal_y if normal_inward else normal_y
         dx = circumference / n
+
+        print(f"instantiate_circle(): n={n}")
         return {
             "pos_x": pos_x,
             "pos_y": pos_y,
@@ -156,6 +162,8 @@ def _instantiate_object(obj, samples_per_wavelength, wavelength):
         normal_x = -normal_x if normal_inward else normal_x
         normal_y = -normal_y if normal_inward else normal_y
         dx = arc_length / n
+
+        print(f"instantiate_arc(): n={n}")
         return {
             "pos_x": pos_x,
             "pos_y": pos_y,
