@@ -17,11 +17,11 @@ import numpy as np
     @param dst_pos_y: y coordinates of samples in the destination object
     @param wavelength: wavelength of the wave
 """
-@jax.jit
 def _rayleigh_sommerfeld_kernel(
-    src_pos_x, src_pos_y, src_normal_x, src_normal_y, src_dx, src_field,
+    k,
+    src_field,
+    src_pos_x, src_pos_y, src_normal_x, src_normal_y, src_dx,
     dst_pos_x, dst_pos_y,
-    wavelength
 ):
     # cartesian product of the samples in the source and destination objects
     # shapes: (num_dst, 1) and (1, num_src)
@@ -50,9 +50,6 @@ def _rayleigh_sommerfeld_kernel(
     else:
         cos_theta = cos_theta_line
 
-    # the contribution from each sample in the source to each sample in the destination is given by the Huygens-Fresnel principle
-    k = 2.0 * jnp.pi / wavelength
-
     # shape: (num_dst, num_src)
     p = (jnp.exp(1j * k * l) / jnp.sqrt(l)) * cos_theta * src_field
 
@@ -62,24 +59,24 @@ def _rayleigh_sommerfeld_kernel(
     # normalization factor
     # ensures that the total power is conserved
     # note: 1/sqrt(1j*lambda) == sqrt(k/(2j*pi))
+    wavelength = 2.0 * jnp.pi / k
     norm_factor = 1.0 / jnp.sqrt(1j * wavelength)
     dst_field = norm_factor * dst_field
 
     return dst_field
 
-@jax.jit
 def _hankel_transmissive_grating_kernel():
     pass
 
-def propagate(d_scene, ia, ib, d_src_field, src_slit, dst_slit):
+def propagate(k, src_field, src_obj, dst_obj):
     return _rayleigh_sommerfeld_kernel(
-        d_scene.objs[ia]["pos_x"],
-        d_scene.objs[ia]["pos_y"],
-        d_scene.objs[ia]["normal_x"],
-        d_scene.objs[ia]["normal_y"],
-        d_scene.objs[ia]["dx"],
-        d_src_field,
-        d_scene.objs[ib]["pos_x"],
-        d_scene.objs[ib]["pos_y"],
-        d_scene.wavelength,
+        k,
+        src_field,
+        src_obj["pos_x"],
+        src_obj["pos_y"],
+        src_obj["normal_x"],
+        src_obj["normal_y"],
+        src_obj["dx"],
+        dst_obj["pos_x"],
+        dst_obj["pos_y"],
     )

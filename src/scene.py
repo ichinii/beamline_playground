@@ -1,10 +1,40 @@
-import numpy as np
 import math
 import jax
 import jax.numpy as jnp
+import numpy as np
+import copy
 from enum import Enum
 
 ### scene ###
+
+def _create_sequential_trace_dag(n):
+    if n == 0: return []
+    dag = [[]]
+    for i in range(n-1):
+        dag.append([i])
+    return dag
+
+class SceneInstance:
+    def __init__(self, scene):
+        self.name = scene.name
+        self.k = 2.0 * np.pi / scene.wavelength
+
+        if hasattr(scene, "trace_dag"):
+            self.trace_dag = copy.deepcopy(scene.trace_dag)
+        else:
+            self.trace_dag = _create_sequential_trace_dag(len(scene.objs))
+
+        instantiated_objs = [
+            _instantiate_object(obj, scene.samples_per_wavelength, scene.wavelength)
+            for obj in scene.objs
+        ]
+
+        self.objs = {
+            key: [obj[key] for obj in instantiated_objs] for key in instantiated_objs[0].keys()
+        }
+
+    # def get_obj(self, i):
+    #     return { key: self.objs[key][i] for key in self.objs.keys() }
 
 class Scene:
     def __init__(self, name, samples_per_wavelength, wavelength):
@@ -65,19 +95,6 @@ class Scene:
             "angle_end": angle_end,
             "normal_inward": normal_inward,
         })
-
-    def instantiate(self):
-        def instantiate_object(obj):
-            return _instantiate_object(obj, self.samples_per_wavelength, self.wavelength)
-
-        objs = [instantiate_object(obj) for obj in self.objs]
-
-        return SceneInstance(self.wavelength, objs)
-
-class SceneInstance:
-    def __init__(self, wavelength, objs):
-        self.wavelength = wavelength
-        self.objs = objs
 
 def _instantiate_object(obj, samples_per_wavelength, wavelength):
     sample_density = samples_per_wavelength / wavelength
