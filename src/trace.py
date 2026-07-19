@@ -4,7 +4,7 @@ import numpy as np
 from algorithms import rayleigh_sommerfeld
 # from algorithms import hankel
 
-def homogeneous_source(n, field):
+def _homogeneous_source(n, field):
     return jnp.full((n,), field, dtype=jnp.complex128)
 
 def _tuple_trace_dag(trace_dag):
@@ -24,7 +24,7 @@ def _trace(k, objs, trace_dag):
 
     for i, deps in enumerate(trace_dag):
         if len(deps) == 0:
-            fields[i] = homogeneous_source(get(i)["pos_x"].shape[0], 1.0 + 0.0j)
+            fields[i] = _homogeneous_source(get(i)["pos_x"].shape[0], 1.0 + 0.0j)
         else:
             # this introduces a memory dependency (acc_field_1 depends acc_field_0) which prevents jax from parallelizing the loop, but it is usefull to limit the memory usage, since the intermediate fields are not stored in memory
             acc_field = jnp.zeros_like(get(i)["pos_x"], dtype=jnp.complex128)

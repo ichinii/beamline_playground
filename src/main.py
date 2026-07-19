@@ -41,7 +41,7 @@ jax.config.update("jax_enable_x64", True) # enable support for complex128
 ### experiment ###
 
 samples_per_wavelength = 4
-wavelength = 0.0123456789
+wavelength = 0.00123456789
 
 def create_scene_law_of_reflection():
     scene = Scene("Law Of Reflection", samples_per_wavelength=samples_per_wavelength, wavelength=wavelength)
@@ -151,14 +151,16 @@ def run_experiment_transmissive_grating():
     plt.legend()
     # plt.show()
 
-run_experiment_transmissive_grating()
+# run_experiment_transmissive_grating()
 
 # scene = create_scene_law_of_reflection()
-# instance = SceneInstance(scene)
-# d_fields = trace(instance)
-# d_intensities = analyze.intensities(d_fields)
-# # d_total_powers = analyze.total_powers(d_intensities, instance.objs["dx"])
-# intensities = [np.array(jax.device_get(intensity)) for intensity in d_intensities]
+scene = create_scene_sequential_beam(2)
+
+instance = SceneInstance(scene)
+d_fields = trace(instance)
+d_intensities = analyze.intensities(d_fields)
+# d_total_powers = analyze.total_powers(d_intensities, instance.objs["dx"])
+intensities = [np.array(jax.device_get(intensity)) for intensity in d_intensities]
 # analyze.plot(scene, intensities)
 
 # scenes = []
