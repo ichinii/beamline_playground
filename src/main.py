@@ -41,7 +41,7 @@ jax.config.update("jax_enable_x64", True) # enable support for complex128
 ### experiment ###
 
 samples_per_wavelength = 4
-wavelength = 0.00123456789
+wavelength = 0.0123456789
 
 def create_scene_law_of_reflection():
     scene = Scene("Law Of Reflection", samples_per_wavelength=samples_per_wavelength, wavelength=wavelength)
@@ -154,7 +154,7 @@ def run_experiment_transmissive_grating():
 # run_experiment_transmissive_grating()
 
 # scene = create_scene_law_of_reflection()
-scene = create_scene_sequential_beam(2)
+scene = create_scene_sequential_beam(10)
 
 instance = SceneInstance(scene)
 d_fields = trace(instance)
