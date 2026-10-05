@@ -149,6 +149,30 @@ Configuration is environment driven:
 The defaults suit local development. **Review the CORS origins and the budget
 before exposing this beyond localhost.**
 
+### Container
+
+```sh
+nix build .#docker
+docker load -i result
+docker run -p 8000:8000 beamline-playground:latest
+```
+
+The image binds `0.0.0.0:8000` (a loopback bind would be unreachable from
+outside the container), runs as `nobody`, and carries a healthcheck probing
+`/api/v1/health`. Configure it the usual way:
+
+```sh
+docker run -p 8000:8000 \
+  -e BEAMLINE_CORS_ORIGINS=https://app.example.com \
+  -e BEAMLINE_MAX_PROPAGATION_PAIRS=500000000 \
+  beamline-playground:latest
+```
+
+It is around 970 MiB uncompressed, 311 MiB as a tarball — jax and scipy
+dominate. Layers are split so that a rebuild of this project usually changes
+only a small top layer. Builds are reproducible: identical inputs give an
+identical digest.
+
 ## Development
 
 A nix flake provides the dev shell and reads its dependencies from

@@ -262,7 +262,8 @@ without them. CI has a dedicated `core-only` job asserting that.
 | --- | --- |
 | **setuptools** (>= 77) | Build backend. The floor is for PEP 639 `license = "MIT"`. |
 | **pyproject.toml** | Single source of truth for dependencies, extras, and all tool config. |
-| **nix flake** | Reproducible dev environment and build. Pinned to `nixos-26.05` (stable) — nothing requires unstable. |
+| **nix flake** | Reproducible dev environment, build, and container image. Pinned to `nixos-26.05` (stable) — nothing requires unstable. |
+| **dockerTools** | Builds the container image from the same derivation as everything else, so the image cannot drift from the package. Layered, so jax and scipy sit in their own layers and a project rebuild changes only a small top layer. |
 | **pyproject-nix** | Lets the flake *read* dependencies from `pyproject.toml` instead of duplicating them in Nix. Without it the dep list would exist twice and drift. |
 
 ## Design decisions worth knowing

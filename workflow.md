@@ -151,12 +151,20 @@ exposes them explicitly.
 | `apps.server` (= `default`) | `nix run .#server` |
 | `overlays.default` | Adds `beamline-playground` to `python3Packages`. |
 | `devShells.default` | `nix develop`, every extra, project not installed. |
+| `packages.docker` | Container image for the server (Linux hosts only). |
 
 ```sh
 nix build .#library              # just the library
 nix build .#python-with-server   # ./result/bin/python has the server importable
 nix run .#server -- --port 8000  # serve the API
+
+nix build .#docker               # container image as a loadable tarball
+docker load -i result
+docker run -p 8000:8000 beamline-playground:latest
 ```
+
+`packages.docker` is guarded to Linux hosts, since `dockerTools` cannot build
+Linux images on darwin.
 
 ### Consuming it from another flake
 
@@ -219,3 +227,32 @@ constraint and stable clears it comfortably.
 Dependencies are declared **once**, in `pyproject.toml`. The flake reads them
 from there via pyproject-nix, so there is no second list to keep in sync. To
 add a dependency, edit `pyproject.toml` and re-enter `nix develop`.
+
+## CI
+
+Runs on pull requests, pushes to `main`, and manual dispatch.
+
+| Job | Purpose |
+| --- | --- |
+| `test` | The suite on python 3.11, 3.12 and 3.13 |
+| `lint` | ruff and mypy |
+| `core-only` | Installs *without* the server extra, asserts FastAPI really is absent, and that the library still imports and the suite still passes |
+| `example` | `examples/basic_scene.py` actually runs |
+| `packaging` | Builds wheel and sdist, `twine check`, asserts `py.typed` is in the wheel |
+| `nix` | `nix flake check`, builds the library and the server env, asserts the core env cannot import the server module |
+| `docker` | Builds the image, runs the container, and checks health, correct physics against the analytic result, and that the cost guard returns 422 |
+
+### Why most jobs use pip rather than nix
+
+Nix pays off when it saves compilation. Every dependency here ships a prebuilt
+wheel on PyPI, so there is nothing to compile, and nix would only add transfer:
+
+| | Cold download |
+| --- | --- |
+| pip wheel set | ~171 MiB, plus `setup-python` pip caching |
+| nix dev shell closure | ~421 MiB compressed, 1.5 GiB unpacked |
+
+So pip drives the fast matrix jobs, and nix is used only where it is
+structurally required: evaluating flake outputs and building the image. The
+`docker` job is by far the slowest (it fetches a ~1 GiB closure); move it to
+`main` only if PR latency matters more than catching image regressions early.
