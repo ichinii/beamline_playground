@@ -4,28 +4,24 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install
-        run: python -m pip install -e '.[server,dev]'
-      - name: Ruff
-        run: ruff check .
-      - name: Mypy
-        run: mypy
+# Most jobs install with pip rather than nix. Every dependency here ships a
+# prebuilt wheel on PyPI, so there is nothing to compile and nix would only
+# add transfer: the pip set is ~171 MiB (and setup-python caches it), against
+# ~421 MiB compressed for the nix dev shell closure. Nix is used only for the
+# jobs that genuinely need it -- evaluating flake outputs and building the
+# container image.
 
+jobs:
   test:
+    name: test (python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -36,32 +32,205 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install
-        run: python -m pip install -e '.[server,dev]'
+        run: python -m pip install --upgrade pip && python -m pip install -e '.[server,dev]'
       - name: Pytest
         run: python -m pytest
 
-  # The library must stay usable without the optional server extra.
-  core-only:
+  lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e '.[server,dev]'
+      - name: Ruff
+        run: ruff check .
+      - name: Mypy
+        run: mypy
+
+  core-only:
+    name: core-only (no server extra)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install without the server extra
         run: python -m pip install -e '.[dev]'
       - name: Importing the library must not need FastAPI
         run: python -c "import beamline_playground; print(beamline_playground.__version__)"
-      - name: Server tests should skip, not fail
-        run: python -m pytest tests/ -q
+      - name: FastAPI must be genuinely absent
+        run: |
+          if python -c "import fastapi" 2>/dev/null; then
+            echo "fastapi is installed; this job cannot prove the extra is optional"
+            exit 1
+          fi
+      - name: Server tests must skip, not fail
+        run: python -m pytest
+
+  example:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e '.[server]'
+      - name: Run the example
+        run: python examples/basic_scene.py
+
+  packaging:
+    name: packaging (wheel and sdist)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Build
+        run: python -m pip install build && python -m build
+      - name: Check metadata
+        run: python -m pip install twine && twine check dist/*
+      - name: The wheel must carry py.typed
+        run: |
+          python - <<'PY'
+          import glob, zipfile, sys
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          if not any(n.endswith("py.typed") for n in names):
+              sys.exit("py.typed missing from the wheel; type hints would be invisible")
+          print("py.typed present in", wheel)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
 
   nix:
+    name: nix (flake outputs)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v27
-      - name: Build the flake package
-        run: nix build .#default --print-build-logs
-      - name: Check the flake
-        run: nix flake check
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+      - name: Flake check
+        run: nix flake check --print-build-logs
+      - name: Build the library
+        run: nix build .#library --print-build-logs
+      - name: Build a python env with the server extra
+        run: nix build .#python-with-server --print-build-logs
+      - name: The server-less env must not import the server module
+        run: |
+          nix build .#python -o result-core
+          if ./result-core/bin/python -c "import beamline_playground.server" 2>/dev/null; then
+            echo "packages.python should not be able to import the server module"
+            exit 1
+          fi
+          ./result-core/bin/python -c "import beamline_playground; print('core env OK')"
+
+  docker:
+    name: docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v27
+      - name: Build the image
+        run: nix build .#docker --print-build-logs
+      - name: Load it
+        run: docker load -i "$(readlink -f result)"
+      - name: Image must be configured for container use
+        run: |
+          docker image inspect beamline-playground:latest \
+            --format 'user={{.Config.User}} cmd={{json .Config.Cmd}} ports={{json .Config.ExposedPorts}}'
+          # A loopback bind would make the container unreachable from outside.
+          docker image inspect beamline-playground:latest --format '{{json .Config.Cmd}}' \
+            | grep -q '0.0.0.0' || { echo "image must bind 0.0.0.0"; exit 1; }
+          # Running as root in a distributed image is a needless risk.
+          test "$(docker image inspect beamline-playground:latest --format '{{.Config.User}}')" != "" \
+            || { echo "image must not run as root"; exit 1; }
+      - name: Smoke test the container
+        run: |
+          docker run -d --name bl -p 8000:8000 beamline-playground:latest
+          for i in $(seq 1 60); do
+            sleep 2
+            curl -sf http://127.0.0.1:8000/api/v1/health && break
+          done
+          echo
+          curl -sf http://127.0.0.1:8000/api/v1/health | grep -q '"status":"ok"' \
+            || { echo "health check failed"; docker logs bl; exit 1; }
+      - name: The container must return correct physics
+        run: |
+          curl -sf -X POST http://127.0.0.1:8000/api/v1/simulate \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"ci","objs":[
+                  {"type":"source","geometry":{"type":"segment","pos_a":{"x":0,"y":-2},"pos_b":{"x":0,"y":2}}},
+                  {"type":"detector","geometry":{"type":"segment","pos_a":{"x":2000,"y":-600},"pos_b":{"x":2000,"y":600}}}],
+                  "dag":[[],[0]],"wavelength":0.5,"samples_per_wavelength":4}' > out.json
+          python - <<'PY'
+          import json, math, sys
+
+          detector = json.load(open("out.json"))["objs"][1]
+          y = detector["sample_x"]
+          intensity = detector["intensity_y"]
+          peak = max(intensity)
+          normalised = [v / peak for v in intensity]
+
+          # Single-slit Fraunhofer: I/I0 = sinc^2(a sin(theta) / lambda).
+          APERTURE, WAVELENGTH, DISTANCE = 4.0, 0.5, 2000.0
+
+          def analytic(position):
+              u = APERTURE * math.sin(math.atan2(position, DISTANCE)) / WAVELENGTH
+              if u == 0:
+                  return 1.0
+              return (math.sin(math.pi * u) / (math.pi * u)) ** 2
+
+          rms = math.sqrt(
+              sum((n - analytic(p)) ** 2 for n, p in zip(normalised, y)) / len(y)
+          )
+          print(f"samples={len(intensity)} rms_vs_analytic={rms:.3e}")
+          if rms > 5e-3:
+              sys.exit(f"container physics wrong: RMS {rms:.3e} exceeds 5e-3")
+          PY
+      - name: Container must reject an over-budget scene
+        run: |
+          docker rm -f blcfg >/dev/null 2>&1 || true
+          docker run -d --name blcfg -p 8001:8000 \
+            -e BEAMLINE_MAX_PROPAGATION_PAIRS=1000 beamline-playground:latest
+          for i in $(seq 1 60); do
+            sleep 2
+            curl -sf http://127.0.0.1:8001/api/v1/health >/dev/null && break
+          done
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8001/api/v1/simulate \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"big","objs":[
+                  {"type":"source","geometry":{"type":"segment","pos_a":{"x":0,"y":-20},"pos_b":{"x":0,"y":20}}},
+                  {"type":"detector","geometry":{"type":"segment","pos_a":{"x":500,"y":-100},"pos_b":{"x":500,"y":100}}}],
+                  "dag":[[],[0]],"wavelength":0.5,"samples_per_wavelength":4}')
+          test "$code" = "422" || { echo "expected 422 from the cost guard, got $code"; exit 1; }
+          echo "cost guard returned 422 as expected"
+      - name: Logs on failure
+        if: failure()
+        run: docker logs bl || true
+      - name: Clean up
+        if: always()
+        run: docker rm -f bl blcfg || true
