@@ -1,84 +1,71 @@
-import math
+"""2D Rayleigh-Sommerfeld diffraction integral (RS1).
+
+This is a far-field form: it omits the Hankel-function term that accounts for
+near-field behaviour, so it is accurate when the propagation distance is large
+compared to the wavelength. See `hankel.py` for the near-field kernels.
+
+The destination axis is processed in chunks so that peak memory stays bounded
+no matter how finely the source is sampled -- a full n_dst x n_src matrix is
+never materialised.
+"""
+
+from functools import partial
+
 import jax
 import jax.numpy as jnp
-import numpy as np
 
-"""
-    2D Rayleigh-Sommerfeld diffraction integral (RS1)
-    far-field approximation, because we are missing the Henkel function term that accounts for near-field effects
+from .base import DEFAULT_MAX_MATRIX_ENTRIES, ObjectSamples, chunk_size_for
 
-    @param src_pos_x: x coordinates of samples in the source object
-    @param src_pos_y: y coordinates of samples in the source object
-    @param src_normal_x: x component of the normal vector of the source object (for lines), or None for points
-    @param src_normal_y: y component of the normal vector of the source object (for lines), or None for points
-    @param src_dx: spacing between samples in the source object (for lines), or 1 for points
-    @param src_field: complex amplitude of the wave at each sample in the source object
-    @param dst_pos_x: single x coordinate of sample in the destination object
-    @param dst_pos_y: single y coordinate of sample in the destination object
-    @param wavelength: wavelength of the wave
-"""
-def _rayleigh_sommerfeld_kernel(
+
+@partial(jax.jit, static_argnames=["chunk_size"])
+def _propagate_impl(
     k,
     src_field,
-    src_pos_x, src_pos_y, src_normal_x, src_normal_y, src_dx,
-    dst_pos_x, dst_pos_y,
+    src_pos_x,
+    src_pos_y,
+    src_normal_x,
+    src_normal_y,
+    src_dx,
+    dst_pos_x,
+    dst_pos_y,
+    chunk_size,
 ):
-    n_src = src_pos_x.shape[0]
+    def one_destination(dst):
+        dx = dst[0] - src_pos_x
+        dy = dst[1] - src_pos_y
+        r = jnp.sqrt(dx * dx + dy * dy)
 
-    def accumulate(i, acc_dst_sample):
-        dx = dst_pos_x - src_pos_x[i]
-        dy = dst_pos_y - src_pos_y[i]
-        r = jnp.sqrt(dx**2 + dy**2)
+        # RS1 obliquity factor: how obliquely the source element radiates
+        # toward this destination point.
+        cos_theta = jnp.abs((dx * src_normal_x + dy * src_normal_y) / r)
+        # Geometric attenuation in 2D.
+        attenuation = 1.0 / jnp.sqrt(r)
 
-        # RS1 obliquity factor
-        cos_theta = jnp.abs(dx/r * src_normal_x + dy/r * src_normal_y)
-        # geometric attentuation
-        att = 1.0/jnp.sqrt(r)
-        # per-source-sample contribution to dst sample
-        contrib = jnp.exp(1j * k * r) * att * cos_theta * src_field[i] * src_dx[i]
-        # accumulation into dst sample
-        return acc_dst_sample + contrib.squeeze()
+        contributions = jnp.exp(1j * k * r) * attenuation * cos_theta * src_field * src_dx
+        return jnp.sum(contributions)
 
-    dst_sample = jax.lax.fori_loop(0, n_src, accumulate, 0.0 + 0.0j)
+    destinations = jnp.stack([dst_pos_x, dst_pos_y], axis=1)
+    # batch_size turns this into a chunked vmap: vectorised within a chunk,
+    # sequential across chunks.
+    dst_field = jax.lax.map(one_destination, destinations, batch_size=chunk_size)
 
-    # RS1 normalization factor
-    # note: 1/sqrt(1j*lambda) == sqrt(k/(2j*pi))
+    # RS1 normalisation. Note 1/sqrt(1j*lambda) == sqrt(k/(2j*pi)).
     wavelength = 2.0 * jnp.pi / k
-    norm_factor = 1.0 / jnp.sqrt(1j * wavelength)
-    dst_sample = norm_factor * dst_sample
+    return dst_field / jnp.sqrt(1j * wavelength)
 
-    return dst_sample
 
-def _rayleigh_sommerfeld_kernel_simple(
+def propagate(
     k,
-    src_field,
-    src_pos_x, src_pos_y, src_normal_x, src_normal_y, src_dx,
-    dst_pos_x, dst_pos_y,
-):
-    dx = dst_pos_x[:, jnp.newaxis] - src_pos_x[jnp.newaxis, :]
-    dy = dst_pos_y[:, jnp.newaxis] - src_pos_y[jnp.newaxis, :]
+    src_field: jax.Array,
+    src_obj: ObjectSamples,
+    dst_obj: ObjectSamples,
+    max_matrix_entries: int = DEFAULT_MAX_MATRIX_ENTRIES,
+) -> jax.Array:
+    """Propagate `src_field` from `src_obj` to `dst_obj`. Conforms to `Propagator`."""
+    n_src = src_obj["pos_x"].shape[0]
+    n_dst = dst_obj["pos_x"].shape[0]
 
-    r = jnp.sqrt(dx**2 + dy**2)
-    attenuation = 1.0/jnp.sqrt(r)
-    cos_theta = jnp.abs(dx/r * src_normal_x + dy/r * src_normal_y)
-
-    dst_matrix = jnp.exp(1j * k * r) * attenuation * cos_theta * src_field * src_dx
-
-    wavelength = 2.0 * jnp.pi / k
-    norm_factor = 1.0 / jnp.sqrt(1j * wavelength)
-    dst_field = norm_factor * dst_matrix.sum(axis=1)
-
-    return dst_field
-
-def propagate(k, src_field, src_obj, dst_obj):
-    # kernel = jax.vmap(_rayleigh_sommerfeld_kernel, in_axes=(
-    #     None,
-    #     None,
-    #     None, None, None, None, None,
-    #     0, 0
-    # ))
-
-    return _rayleigh_sommerfeld_kernel_simple(
+    return _propagate_impl(
         k,
         src_field,
         src_obj["pos_x"],
@@ -88,4 +75,5 @@ def propagate(k, src_field, src_obj, dst_obj):
         src_obj["dx"],
         dst_obj["pos_x"],
         dst_obj["pos_y"],
+        chunk_size=chunk_size_for(n_src, n_dst, max_matrix_entries),
     )
