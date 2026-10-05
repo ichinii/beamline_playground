@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beamline-playground"
+version = "0.1.0"
+description = "2D wave-optics beamline simulation"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "Sven Erdem", email = "svenerdem@gmail.com" }]
+dependencies = [
+    "numpy>=1.24",
+    # The decorator-factory form `@jax.jit(static_argnames=...)` used in
+    # simulate.py and algorithms/hankel.py needs a reasonably recent jax.
+    "jax>=0.4.30",
+    "pydantic>=2.0",
+    # algorithms/hankel.py uses scipy.special.hankel1 via jax.pure_callback.
+    "scipy>=1.10",
+]
+
+[project.scripts]
+beamline-server = "beamline_playground.server.__main__:main"
+
+[project.optional-dependencies]
+# The REST API for a frontend / thin client. Not needed to use the library.
+server = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "mypy>=1.8",
+    # fastapi's TestClient is built on starlette's, which requires httpx.
+    "httpx>=0.27",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+beamline_playground = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+filterwarnings = ["error::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+# The pydantic Field(description=...) strings are deliberately long: they are
+# the API documentation and the OpenAPI schema.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Re-exports are the point of these files.
+"src/beamline_playground/__init__.py" = ["F401", "RUF022"]  # __all__ grouped by concern, not sorted
+"src/beamline_playground/algorithms/__init__.py" = ["F401"]
+"src/beamline_playground/server/__init__.py" = ["F401", "E402"]
+# Tests import fixtures and use module-level importorskip before imports.
+"tests/*" = ["E402"]
+
+[tool.mypy]
+files = ["src"]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+no_implicit_optional = true
