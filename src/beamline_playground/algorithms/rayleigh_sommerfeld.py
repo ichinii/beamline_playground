@@ -49,15 +49,36 @@ def _rayleigh_sommerfeld_kernel(
 
     return dst_sample
 
-def propagate(k, src_field, src_obj, dst_obj):
-    kernel = jax.vmap(_rayleigh_sommerfeld_kernel, in_axes=(
-        None,
-        None,
-        None, None, None, None, None,
-        0, 0
-    ))
+def _rayleigh_sommerfeld_kernel_simple(
+    k,
+    src_field,
+    src_pos_x, src_pos_y, src_normal_x, src_normal_y, src_dx,
+    dst_pos_x, dst_pos_y,
+):
+    dx = dst_pos_x[:, jnp.newaxis] - src_pos_x[jnp.newaxis, :]
+    dy = dst_pos_y[:, jnp.newaxis] - src_pos_y[jnp.newaxis, :]
 
-    return kernel(
+    r = jnp.sqrt(dx**2 + dy**2)
+    attenuation = 1.0/jnp.sqrt(r)
+    cos_theta = jnp.abs(dx/r * src_normal_x + dy/r * src_normal_y)
+
+    dst_matrix = jnp.exp(1j * k * r) * attenuation * cos_theta * src_field * src_dx
+
+    wavelength = 2.0 * jnp.pi / k
+    norm_factor = 1.0 / jnp.sqrt(1j * wavelength)
+    dst_field = norm_factor * dst_matrix.sum(axis=1)
+
+    return dst_field
+
+def propagate(k, src_field, src_obj, dst_obj):
+    # kernel = jax.vmap(_rayleigh_sommerfeld_kernel, in_axes=(
+    #     None,
+    #     None,
+    #     None, None, None, None, None,
+    #     0, 0
+    # ))
+
+    return _rayleigh_sommerfeld_kernel_simple(
         k,
         src_field,
         src_obj["pos_x"],
