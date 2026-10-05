@@ -190,3 +190,59 @@ class TestConvergence:
         # Successive refinements must move the answer less and less.
         assert abs(finer - fine) < abs(fine - coarse)
 
+
+class TestObliquityFactor:
+    """The RS1 obliquity factor: amplitude ~ cos(theta), intensity ~ cos^2(theta).
+
+    This needs its own test. The `sinc^2` benchmark above cannot check it: the
+    textbook Fraunhofer formula itself omits the obliquity factor, so deleting
+    `cos(theta)` from the kernel actually *improves* agreement with `sinc^2`.
+    Mutation-testing the kernel is how that was discovered.
+
+    Here the source is sub-wavelength (so it acts as one radiating element) and
+    the detectors sit on a circle of fixed radius, so distance is held constant
+    and only the angle to the source normal varies.
+    """
+
+    WAVELENGTH = 0.5
+    RADIUS = 400.0
+    ANGLES_DEG = (0.0, 15.0, 30.0, 45.0, 60.0)
+
+    @pytest.fixture(scope="class")
+    def intensities(self):
+        tiny = self.WAVELENGTH / 20
+        angles = np.radians(self.ANGLES_DEG)
+        # A vertical segment's normal points along +X.
+        objs = [Source(geometry=Segment(
+            pos_a=Vec2(x=0, y=-tiny / 2), pos_b=Vec2(x=0, y=tiny / 2)))]
+        for theta in angles:
+            cx, cy = self.RADIUS * np.cos(theta), self.RADIUS * np.sin(theta)
+            objs.append(Detector(geometry=Segment(
+                pos_a=Vec2(x=cx, y=cy - tiny / 2), pos_b=Vec2(x=cx, y=cy + tiny / 2))))
+        scene = Scene(
+            name="obliquity", objs=objs,
+            dag=[[]] + [[0]] * len(angles),
+            wavelength=self.WAVELENGTH, samples_per_wavelength=8,
+        )
+        result = simulate(scene)
+        measured = np.array([np.mean(o.intensity_y) for o in result.objs[1:]])
+        return measured / measured[0]
+
+    def test_follows_cos_squared(self, intensities):
+        expected = np.cos(np.radians(self.ANGLES_DEG)) ** 2
+        np.testing.assert_allclose(intensities, expected, rtol=1e-5)
+
+    def test_amplitude_follows_cos(self, intensities):
+        expected = np.cos(np.radians(self.ANGLES_DEG))
+        np.testing.assert_allclose(np.sqrt(intensities), expected, rtol=1e-5)
+
+    def test_obliquity_is_actually_applied(self, intensities):
+        """Guards the specific mutation: cos(theta) replaced by 1."""
+        assert intensities[-1] == pytest.approx(0.25, rel=1e-3), (
+            "intensity at 60 degrees must be cos^2(60) = 0.25; a value near 1.0 "
+            "means the obliquity factor is missing"
+        )
+
+    def test_on_axis_is_the_maximum(self, intensities):
+        assert intensities[0] == pytest.approx(1.0)
+        assert np.all(np.diff(intensities) < 0), "intensity must fall with angle"
