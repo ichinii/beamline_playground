@@ -22,6 +22,9 @@ class SceneInstance:
             Kept out of `objs` so it is never traced into a jitted kernel.
         dag: the scene's dependency graph, as nested tuples so it can be used
             as a static (hashable) jit argument.
+        order: object indices in dependency order. Propagation must follow this
+            rather than list order, or an object listed before its illuminator
+            would be evaluated while still dark.
     """
 
     def __init__(self, scene: Scene):
@@ -46,6 +49,7 @@ class SceneInstance:
             self.sample_coords.append(samples.s)
 
         self.dag = tuple(tuple(deps) for deps in scene.dag)
+        self.order = scene.topological_order()
 
     def __len__(self) -> int:
         return len(self.objs)

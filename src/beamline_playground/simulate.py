@@ -77,16 +77,20 @@ class SimulationResult(BaseModel):
         raise KeyError(obj_id)
 
 
-@partial(jax.jit, static_argnames=["dag", "is_source", "propagators"])
-def _simulate_impl(k, objs, dag, is_source, propagators):
+@partial(jax.jit, static_argnames=["dag", "order", "is_source", "propagators"])
+def _simulate_impl(k, objs, dag, order, is_source, propagators):
     """Accumulate fields across the DAG.
 
     `propagators[i]` is the kernel used when object i radiates; it is None for
     objects that never radiate (detectors).
 
-    `dag`, `is_source` and `propagators` are static because the Python loop
-    below is unrolled at trace time into a fixed XLA graph; their values decide
-    the graph's shape, so they must be known when tracing.
+    `order` is a topological ordering of the objects. Propagating in list
+    order instead would evaluate an object before its illuminator had been
+    computed, silently yielding zeros.
+
+    `dag`, `order`, `is_source` and `propagators` are static because the Python
+    loop below is unrolled at trace time into a fixed XLA graph; their values
+    decide the graph's shape, so they must be known when tracing.
 
     `k` is traced rather than static, which avoids a recompile when the
     wavelength changes without changing any element count. Note that a
@@ -103,8 +107,8 @@ def _simulate_impl(k, objs, dag, is_source, propagators):
 
     fields = [initial_field(i) for i in range(len(dag))]
 
-    for dst_index, deps in enumerate(dag):
-        for src_index in deps:
+    for dst_index in order:
+        for src_index in dag[dst_index]:
             propagate = propagators[src_index]
             fields[dst_index] = fields[dst_index] + propagate(k, fields[src_index], objs[src_index], objs[dst_index])
 
@@ -146,7 +150,7 @@ def simulate(scene: Scene, propagators: PropagatorMap = FAR_FIELD_PROPAGATORS) -
         scene.total_sample_count(),
     )
 
-    fields = _simulate_impl(k, instance.objs, instance.dag, is_source, tuple(per_object))
+    fields = _simulate_impl(k, instance.objs, instance.dag, instance.order, is_source, tuple(per_object))
 
     def object_result(index: int) -> ObjectResult:
         obj = scene.objs[index]

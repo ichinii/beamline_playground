@@ -315,7 +315,8 @@ class Scene(BaseModel):
                 raise ValueError(f"dag[{dst}] lists the same dependency more than once")
 
         self._check_physics()
-        self._check_acyclic()
+        # Also the acyclicity check: this raises on a cycle.
+        self.topological_order()
         return self
 
     def _check_physics(self) -> None:
@@ -333,34 +334,39 @@ class Scene(BaseModel):
                         "detectors absorb light and cannot re-radiate it"
                     )
 
-    def _check_acyclic(self) -> None:
-        # Iterative depth-first search; recursion would risk a stack overflow
-        # on a large scene and this runs on untrusted server input.
-        UNVISITED, IN_PROGRESS, DONE = 0, 1, 2
-        state = [UNVISITED] * len(self.objs)
+    def topological_order(self) -> tuple[int, ...]:
+        """Object indices ordered so every dependency precedes its dependents.
 
-        for root in range(len(self.objs)):
-            if state[root] != UNVISITED:
-                continue
-            stack = [(root, iter(self.dag[root]))]
-            state[root] = IN_PROGRESS
-            while stack:
-                node, deps = stack[-1]
-                advanced = False
-                for dep in deps:
-                    if state[dep] == IN_PROGRESS:
-                        raise ValueError(
-                            f"dag contains a cycle involving object index {dep}; "
-                            "the graph must be acyclic"
-                        )
-                    if state[dep] == UNVISITED:
-                        state[dep] = IN_PROGRESS
-                        stack.append((dep, iter(self.dag[dep])))
-                        advanced = True
-                        break
-                if not advanced:
-                    state[node] = DONE
-                    stack.pop()
+        `simulate` must propagate in this order: an object's field is only
+        complete once everything feeding into it has been computed. Iterating
+        `objs` in list order instead would silently produce zeros wherever a
+        source happens to be listed after its destination.
+
+        Raises:
+            ValueError: if the graph contains a cycle.
+        """
+        n = len(self.objs)
+        # Kahn's algorithm, iterative so a long chain cannot overflow a stack.
+        remaining_deps = [len(deps) for deps in self.dag]
+        dependents: list[list[int]] = [[] for _ in range(n)]
+        for dst, deps in enumerate(self.dag):
+            for src in deps:
+                dependents[src].append(dst)
+
+        ready = [i for i in range(n) if remaining_deps[i] == 0]
+        order: list[int] = []
+        while ready:
+            node = ready.pop()
+            order.append(node)
+            for dst in dependents[node]:
+                remaining_deps[dst] -= 1
+                if remaining_deps[dst] == 0:
+                    ready.append(dst)
+
+        if len(order) != n:
+            unresolved = [i for i in range(n) if remaining_deps[i] > 0]
+            raise ValueError(f"dag contains a cycle involving object indices {unresolved}; the graph must be acyclic")
+        return tuple(order)
 
     def sample_counts(self) -> list[int]:
         """Element count for each object, at this scene's sampling density."""

@@ -234,3 +234,105 @@ class TestSceneInstance:
 
         assert peak(5.0) != pytest.approx(peak(4.0), rel=1e-3)
 
+
+class TestPropagationOrder:
+    """Results must not depend on the order objects are listed in.
+
+    The loop once iterated in list order, so an object listed before its
+    illuminator was evaluated while still dark and silently returned zeros.
+    """
+
+    @staticmethod
+    def _seg(x):
+        return Segment(pos_a=Vec2(x=x, y=-1), pos_b=Vec2(x=x, y=1))
+
+    def _ordered(self):
+        return Scene(
+            objs=[
+                Source(geometry=self._seg(0)),
+                Mirror(geometry=self._seg(10)),
+                Detector(geometry=self._seg(20)),
+            ],
+            dag=[[], [0], [1]],
+            wavelength=5,
+            samples_per_wavelength=4,
+        )
+
+    def _shuffled(self):
+        """Identical optics, but the mirror is listed after the detector."""
+        return Scene(
+            objs=[
+                Source(geometry=self._seg(0)),
+                Detector(geometry=self._seg(20)),
+                Mirror(geometry=self._seg(10)),
+            ],
+            dag=[[], [2], [0]],
+            wavelength=5,
+            samples_per_wavelength=4,
+        )
+
+    def test_list_order_does_not_change_the_result(self):
+        ordered = simulate(self._ordered()).objs[2].intensity_y
+        shuffled = simulate(self._shuffled()).objs[1].intensity_y
+        np.testing.assert_allclose(shuffled, ordered, rtol=1e-6)
+
+    def test_downstream_object_is_actually_illuminated(self):
+        """Guards the specific failure: a silent zero."""
+        detector = simulate(self._shuffled()).objs[1]
+        assert max(detector.intensity_y) > 0
+
+    def test_mirror_is_illuminated_in_both_orderings(self):
+        a = max(simulate(self._ordered()).objs[1].intensity_y)
+        b = max(simulate(self._shuffled()).objs[2].intensity_y)
+        assert a == pytest.approx(b, rel=1e-6)
+
+
+class TestTopologicalOrder:
+    @staticmethod
+    def _chain(n):
+        objs = [Source(geometry=segment(y=0))] + [Mirror(geometry=segment(y=i + 1)) for i in range(n - 1)]
+        return Scene(objs=objs, dag=[[]] + [[i] for i in range(n - 1)], wavelength=5, samples_per_wavelength=1)
+
+    def test_dependencies_precede_dependents(self):
+        scene = self._shuffled_scene()
+        order = scene.topological_order()
+        position = {obj: i for i, obj in enumerate(order)}
+        for dst, deps in enumerate(scene.dag):
+            for src in deps:
+                assert position[src] < position[dst]
+
+    @staticmethod
+    def _shuffled_scene():
+        def seg(x):
+            return Segment(pos_a=Vec2(x=x, y=-1), pos_b=Vec2(x=x, y=1))
+
+        return Scene(
+            objs=[
+                Source(geometry=seg(0)),
+                Detector(geometry=seg(20)),
+                Mirror(geometry=seg(10)),
+            ],
+            dag=[[], [2], [0]],
+            wavelength=5,
+            samples_per_wavelength=4,
+        )
+
+    def test_includes_every_object_exactly_once(self):
+        order = self._chain(5).topological_order()
+        assert sorted(order) == list(range(5))
+
+    def test_is_hashable_for_jit(self):
+        hash(self._chain(4).topological_order())
+
+    def test_handles_a_deep_chain(self):
+        order = self._chain(2000).topological_order()
+        assert len(order) == 2000
+
+    def test_isolated_objects_are_included(self):
+        scene = Scene(
+            objs=[Source(geometry=segment(y=0)), Source(geometry=segment(y=1))],
+            dag=[[], []],
+            wavelength=5,
+            samples_per_wavelength=1,
+        )
+        assert sorted(scene.topological_order()) == [0, 1]
